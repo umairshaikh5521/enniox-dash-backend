@@ -1,4 +1,6 @@
-import { supabase } from "../../../config/database";
+import { eq } from "drizzle-orm";
+import { db } from "../../../db";
+import { users } from "../../../db/schema/user.schema";
 import {
   CreateUserDto,
   UpdateUserDto,
@@ -9,49 +11,24 @@ import logger from "../../../common/utils/logger";
 import { ApiError } from "../../../common/errors/api-error";
 
 export class UserRepository {
-  private static readonly TABLE_NAME = "users";
-
-  private transformToSnakeCase(data: any) {
-    return {
-      email: data.email,
-      password: data.password,
-      first_name: data.firstName,
-      last_name: data.lastName,
-      role: data.role,
-    };
-  }
-
-  private transformToCamelCase(data: any): User {
-    return {
-      id: data.id,
-      email: data.email,
-      password: data.password,
-      firstName: data.first_name,
-      lastName: data.last_name,
-      role: data.role,
-      createdAt: new Date(data.created_at),
-      updatedAt: new Date(data.updated_at),
-    };
-  }
-
   public async createUser(userData: CreateUserDto): Promise<User> {
     try {
-      const { data, error } = await supabase
-        .from(UserRepository.TABLE_NAME)
-        .insert([this.transformToSnakeCase(userData)])
-        .select()
-        .single();
+      const [user] = await db
+        .insert(users)
+        .values({
+          email: userData.email,
+          password: userData.password,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          role: userData.role || "customer",
+        })
+        .returning();
 
-      if (error) {
-        logger.error("Error creating user:", error);
-        throw new ApiError(400, error.message);
-      }
-
-      if (!data) {
+      if (!user) {
         throw new ApiError(500, "Failed to create user");
       }
 
-      return this.transformToCamelCase(data);
+      return this.mapToUser(user);
     } catch (error) {
       logger.error("Repository error creating user:", error);
       if (error instanceof ApiError) {
@@ -63,18 +40,11 @@ export class UserRepository {
 
   public async findUserByEmail(email: string): Promise<User | null> {
     try {
-      const { data, error } = await supabase
-        .from(UserRepository.TABLE_NAME)
-        .select()
-        .eq("email", email)
-        .single();
+      const user = await db.query.users.findFirst({
+        where: eq(users.email, email),
+      });
 
-      if (error) {
-        logger.error("Error finding user by email:", error);
-        return null;
-      }
-
-      return data ? this.transformToCamelCase(data) : null;
+      return user ? this.mapToUser(user) : null;
     } catch (error) {
       logger.error("Repository error finding user:", error);
       return null;
@@ -83,23 +53,20 @@ export class UserRepository {
 
   public async updateUser(id: string, userData: UpdateUserDto): Promise<User> {
     try {
-      const { data, error } = await supabase
-        .from(UserRepository.TABLE_NAME)
-        .update(this.transformToSnakeCase(userData))
-        .eq("id", id)
-        .select()
-        .single();
+      const [user] = await db
+        .update(users)
+        .set({
+          ...userData,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, id))
+        .returning();
 
-      if (error) {
-        logger.error("Error updating user:", error);
-        throw new ApiError(400, error.message);
-      }
-
-      if (!data) {
+      if (!user) {
         throw new ApiError(404, "User not found");
       }
 
-      return this.transformToCamelCase(data);
+      return this.mapToUser(user);
     } catch (error) {
       logger.error("Repository error updating user:", error);
       if (error instanceof ApiError) {
@@ -111,16 +78,8 @@ export class UserRepository {
 
   public async getAllUsers(): Promise<User[]> {
     try {
-      const { data, error } = await supabase
-        .from(UserRepository.TABLE_NAME)
-        .select("*");
-
-      if (error) {
-        logger.error("Error getting all users:", error);
-        throw new ApiError(400, error.message);
-      }
-
-      return data.map((user) => this.transformToCamelCase(user));
+      const allUsers = await db.query.users.findMany();
+      return allUsers.map((user) => this.mapToUser(user));
     } catch (error) {
       logger.error("Repository error getting all users:", error);
       if (error instanceof ApiError) {
@@ -132,17 +91,10 @@ export class UserRepository {
 
   public async getSuppliers(): Promise<User[]> {
     try {
-      const { data, error } = await supabase
-        .from(UserRepository.TABLE_NAME)
-        .select("*")
-        .eq("role", UserRole.SUPPLIER);
-
-      if (error) {
-        logger.error("Error getting suppliers:", error);
-        throw new ApiError(400, error.message);
-      }
-
-      return data.map((user) => this.transformToCamelCase(user));
+      const suppliers = await db.query.users.findMany({
+        where: eq(users.role, "supplier"),
+      });
+      return suppliers.map((user) => this.mapToUser(user));
     } catch (error) {
       logger.error("Repository error getting suppliers:", error);
       if (error instanceof ApiError) {
@@ -150,5 +102,18 @@ export class UserRepository {
       }
       throw new ApiError(500, "Failed to get suppliers");
     }
+  }
+
+  private mapToUser(data: any): User {
+    return {
+      id: data.id,
+      email: data.email,
+      password: data.password,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      role: data.role,
+      createdAt: new Date(data.createdAt),
+      updatedAt: new Date(data.updatedAt),
+    };
   }
 }

@@ -6,6 +6,7 @@ import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { userRouter } from "./modules/user/routes/user-routes";
+import { healthRouter } from "./modules/health/routes/health-routes";
 import logger from "./common/utils/logger";
 
 const app = express();
@@ -27,6 +28,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Routes
 app.use("/api/users", userRouter);
+app.use("/api", healthRouter);
 
 // Error handling middleware
 interface ApiError extends Error {
